@@ -61,10 +61,10 @@ export function UserProfileConfig({ user }) {
         if (data.success && data.data) {
           const norm = data.data.map(p => ({
             id: p.id,
-            name: p.first_name,
-            company: p.company_name,
+            name: p.first_name !== undefined ? p.first_name : p.name,
+            company: p.company_name !== undefined ? p.company_name : p.company,
             email: p.email,
-            loginId: p.login_id
+            loginId: p.login_id !== undefined ? p.login_id : p.loginId
           }));
           setProfiles(norm);
         } else {
@@ -103,7 +103,7 @@ export function UserProfileConfig({ user }) {
 
   // Form states for Add Profile
   const [formFirstName, setFormFirstName] = useState('');
-  const [formCompanyName, setFormCompanyName] = useState('');
+  const [formLastName, setFormLastName] = useState('');
   const [formCompanyAccess, setFormCompanyAccess] = useState('');
   const [formLoginId, setFormLoginId] = useState('');
   const [formPassword, setFormPassword] = useState('');
@@ -176,7 +176,7 @@ export function UserProfileConfig({ user }) {
 
     // Prevent saving if all fields are empty
     const allNull = !formFirstName.trim() && 
-                    !formCompanyName.trim() && 
+                    !formLastName.trim() && 
                     !formCompanyAccess && 
                     !formLoginId.trim() && 
                     !formPassword.trim() && 
@@ -192,16 +192,19 @@ export function UserProfileConfig({ user }) {
       return;
     }
 
-    const companySelected = formCompanyAccess || formCompanyName.trim() || 'N/A';
+    const companySelected = formCompanyAccess || 'N/A';
 
     // Prepare dynamic email from Login ID & Company Access
     const domainText = companySelected.toLowerCase().replace(/[^a-z0-9]/g, '');
     const computedEmail = `${formLoginId.trim().toLowerCase() || 'user'}@${domainText}.com`;
     const generatedId = Date.now().toString();
 
+    // Vince Carter Scenario: name consists of First Name and Last Name
+    const fullName = `${formFirstName.trim()} ${formLastName.trim()}`.trim() || 'Unnamed Profile';
+
     const newProfile = {
       id: generatedId,
-      name: formFirstName.trim() || 'Unnamed Profile',
+      name: fullName,
       company: companySelected,
       email: computedEmail,
       loginId: formLoginId.trim()
@@ -237,7 +240,7 @@ export function UserProfileConfig({ user }) {
 
   const resetForm = () => {
     setFormFirstName('');
-    setFormCompanyName('');
+    setFormLastName('');
     setFormCompanyAccess('');
     setFormLoginId('');
     setFormPassword('');
@@ -282,7 +285,7 @@ export function UserProfileConfig({ user }) {
 
   // Save button is disabled if ALL form inputs are empty
   const isFormEmpty = !formFirstName.trim() && 
-                      !formCompanyName.trim() && 
+                      !formLastName.trim() && 
                       !formCompanyAccess && 
                       !formLoginId.trim() && 
                       !formPassword.trim() && 
@@ -362,19 +365,19 @@ export function UserProfileConfig({ user }) {
               />
             </div>
 
-            {/* Company Name textfield */}
+            {/* Last Name textfield */}
             <div>
               <label className="block text-[11px] font-bold text-slate-500 uppercase tracking-wider mb-1">
-                Company Name <span className="text-red-500">*</span>
+                Last Name <span className="text-red-500">*</span>
               </label>
               <input
                 type="text"
                 required
-                value={formCompanyName}
-                onChange={(e) => setFormCompanyName(e.target.value)}
-                placeholder="e.g. DBS Corporate"
+                value={formLastName}
+                onChange={(e) => setFormLastName(e.target.value)}
+                placeholder="e.g. Carter"
                 className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 h-9 transition-shadow"
-                id="form-company-name"
+                id="form-last-name"
               />
             </div>
 
@@ -387,9 +390,6 @@ export function UserProfileConfig({ user }) {
                 value={formCompanyAccess}
                 onChange={(e) => {
                   setFormCompanyAccess(e.target.value);
-                  if (e.target.value && !formCompanyName) {
-                    setFormCompanyName(e.target.value);
-                  }
                 }}
                 required
                 className="w-full bg-white border border-slate-300 rounded px-2.5 py-1.5 text-xs text-slate-800 focus:outline-none focus:border-indigo-500 focus:ring-1 focus:ring-indigo-500 h-9 transition-shadow cursor-pointer"

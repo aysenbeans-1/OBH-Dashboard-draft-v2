@@ -202,7 +202,7 @@ async function startServer() {
       const finalId = t.id || Math.random().toString(36).substring(2, 9);
       await query(
         `INSERT INTO tenants (
-          id, cp_code, company_name, short_code, applicationId, password,
+          id, cp_code, company_name, short_code, application_id, password,
           mo_certificate_name, mo_access_protocol, ssl_enabled, bounce_sms_url, mo_production_url,
           dlr_staging_url, dlr_production_url, mt_staging_url, mt_production_url1, mt_production_url2,
           cp_portal_url, local_routing_operator, international_routing_operator, description,
