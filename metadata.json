@@ -1,0 +1,8 @@
+{
+  "name": "OBH Dashboard ver 2.1",
+  "description": "Multi-tenant OTP management system with Admin and Customer dashboard roles.",
+  "requestFramePermissions": [],
+  "majorCapabilities": [
+    "MAJOR_CAPABILITY_SERVER_SIDE_GEMINI_API"
+  ]
+}
