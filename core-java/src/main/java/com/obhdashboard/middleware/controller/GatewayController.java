@@ -47,7 +47,7 @@ public class GatewayController {
     @PreAuthorize("hasAnyRole('USER', 'ADMIN')")
     public ResponseEntity<?> createUserProfile(@Valid @RequestBody UserProfileRequestDto profileDto) {
         // Forward validated request downstream to the Node/Express backend
-        String endpoint = backendUrl + "/api/user_profiles";
+        String endpoint = backendUrl + "/api/user-profiles";
         HttpHeaders headers = new HttpHeaders();
         headers.setContentType(MediaType.APPLICATION_JSON);
         HttpEntity<UserProfileRequestDto> entity = new HttpEntity<>(profileDto, headers);

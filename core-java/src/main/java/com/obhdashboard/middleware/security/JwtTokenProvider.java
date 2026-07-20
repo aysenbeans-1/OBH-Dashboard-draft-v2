@@ -24,6 +24,19 @@ public class JwtTokenProvider {
         this.expirationMs = expirationMs;
     }
 
+    public String generateToken(String username, List<String> roles) {
+        Date now = new Date();
+        Date expiryDate = new Date(now.getTime() + expirationMs);
+
+        return Jwts.builder()
+                .subject(username)
+                .claim("roles", roles)
+                .issuedAt(now)
+                .expiration(expiryDate)
+                .signWith(key)
+                .compact();
+    }
+
     public boolean validateToken(String token) {
         try {
             Jwts.parser().verifyWith(key).build().parseSignedClaims(token);
