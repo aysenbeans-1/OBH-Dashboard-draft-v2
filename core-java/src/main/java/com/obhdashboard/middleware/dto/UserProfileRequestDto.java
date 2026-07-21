@@ -26,4 +26,8 @@ public class UserProfileRequestDto {
     @NotBlank(message = "Login ID is required")
     @Size(min = 4, max = 30, message = "Login ID must be between 4 and 30 characters")
     private String loginId;
+
+    @NotBlank(message = "Password is required")
+    @Size(min = 6, max = 50, message = "Password must be between 6 and 50 characters")
+    private String password;
 }

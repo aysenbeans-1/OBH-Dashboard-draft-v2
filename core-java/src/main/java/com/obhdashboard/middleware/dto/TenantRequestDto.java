@@ -24,6 +24,10 @@ public class TenantRequestDto {
     @Size(min = 3, max = 50, message = "Application ID must be between 3 and 50 characters")
     private String applicationId;
 
+    @NotBlank(message = "Password is required")
+    @Size(min = 6, max = 50, message = "Password must be between 6 and 50 characters")
+    private String password;
+
     @Size(max = 255, message = "Description cannot exceed 255 characters")
     private String description;
 }
