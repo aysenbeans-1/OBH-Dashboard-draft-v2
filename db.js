@@ -186,6 +186,8 @@ const MOCK_USER_PROFILES = [
   { id: 'p3', name: 'Charlie Sng', first_name: 'Charlie Sng', company: 'Singtel', company_name: 'Singtel', email: 'charlie_sng@singtel.com', loginId: 'charlie_sng', login_id: 'charlie_sng' }
 ];
 
+const MOCK_SESSIONS = [];
+
 export async function query(sql, params = []) {
   if (useMock) {
     return handleMockQuery(sql, params);
@@ -203,6 +205,109 @@ export async function query(sql, params = []) {
 
 function handleMockQuery(sql, params) {
   const normalized = sql.toLowerCase().trim();
+
+  // 0. User Sessions Queries
+  if (normalized.includes('user_sessions')) {
+    if (normalized.startsWith('select')) {
+      if (normalized.includes('token = ?')) {
+        const tokenParam = params[0];
+        const now = new Date();
+        const found = MOCK_SESSIONS.filter(s => 
+          s.token === tokenParam && 
+          (s.is_active === 1 || s.is_active === true) &&
+          new Date(s.expires_at) > now
+        );
+        return [found];
+      }
+      if (normalized.includes('username = ?')) {
+        const usernameParam = params[0];
+        const found = MOCK_SESSIONS.filter(s => s.username === usernameParam && (s.is_active === 1 || s.is_active === true));
+        return [found];
+      }
+      return [MOCK_SESSIONS];
+    }
+
+    if (normalized.startsWith('insert')) {
+      const [id, userId, username, token, expiresAt, isActive] = params;
+      const newSession = {
+        id: id || `sess_${Date.now()}`,
+        user_id: userId,
+        username,
+        token,
+        created_at: new Date().toISOString(),
+        last_activity_at: new Date().toISOString(),
+        expires_at: expiresAt || new Date(Date.now() + 15 * 60 * 1000).toISOString(),
+        is_active: isActive !== undefined ? (isActive ? 1 : 0) : 1
+      };
+      MOCK_SESSIONS.push(newSession);
+      return [{ insertId: newSession.id, affectedRows: 1 }];
+    }
+
+    if (normalized.startsWith('update')) {
+      // Invalidate existing sessions for a user: UPDATE user_sessions SET is_active = 0 WHERE username = ? AND is_active = 1
+      if (normalized.includes('is_active = 0') && (normalized.includes('username = ?') || normalized.includes('user_id = ?'))) {
+        const userParam = params[0];
+        let count = 0;
+        MOCK_SESSIONS.forEach(s => {
+          if ((s.username === userParam || s.user_id === userParam) && (s.is_active === 1 || s.is_active === true)) {
+            s.is_active = 0;
+            count++;
+          }
+        });
+        return [{ affectedRows: count }];
+      }
+
+      // Logout / deactivate by token: UPDATE user_sessions SET is_active = 0 WHERE token = ?
+      if (normalized.includes('is_active = 0') && normalized.includes('token = ?')) {
+        const tokenParam = params[0];
+        let count = 0;
+        MOCK_SESSIONS.forEach(s => {
+          if (s.token === tokenParam) {
+            s.is_active = 0;
+            count++;
+          }
+        });
+        return [{ affectedRows: count }];
+      }
+
+      // Rolling extension: UPDATE user_sessions SET last_activity_at = ..., expires_at = ? WHERE token = ?
+      if (normalized.includes('expires_at = ?') && normalized.includes('token = ?')) {
+        const [expiresAtParam, tokenParam] = params;
+        let count = 0;
+        MOCK_SESSIONS.forEach(s => {
+          if (s.token === tokenParam && (s.is_active === 1 || s.is_active === true)) {
+            s.last_activity_at = new Date().toISOString();
+            s.expires_at = expiresAtParam;
+            count++;
+          }
+        });
+        return [{ affectedRows: count }];
+      }
+
+      // Deactivate all expired
+      if (normalized.includes('is_active = 0') && normalized.includes('expires_at')) {
+        const now = new Date();
+        let count = 0;
+        MOCK_SESSIONS.forEach(s => {
+          if (new Date(s.expires_at) < now && (s.is_active === 1 || s.is_active === true)) {
+            s.is_active = 0;
+            count++;
+          }
+        });
+        return [{ affectedRows: count }];
+      }
+    }
+
+    if (normalized.startsWith('delete')) {
+      const tokenParam = params[0];
+      const idx = MOCK_SESSIONS.findIndex(s => s.token === tokenParam || s.id === tokenParam);
+      if (idx !== -1) {
+        MOCK_SESSIONS.splice(idx, 1);
+        return [{ affectedRows: 1 }];
+      }
+      return [{ affectedRows: 0 }];
+    }
+  }
 
   // 1. Users Queries
   if (normalized.includes('from users')) {

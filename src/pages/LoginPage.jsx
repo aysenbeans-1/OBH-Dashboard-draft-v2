@@ -1,16 +1,18 @@
 import { useState, useEffect } from 'react';
-import { useNavigate, useParams } from 'react-router-dom';
-import { Lock, User, ShieldCheck, Globe } from 'lucide-react';
+import { useNavigate, useParams, useLocation } from 'react-router-dom';
+import { Lock, User, ShieldCheck, Globe, AlertCircle } from 'lucide-react';
 import { cn } from '../lib/utils';
 
 export function LoginPage({ onLogin }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { tenantId: pathTenantId } = useParams();
   const [username, setUsername] = useState('');
   const [password, setPassword] = useState('');
   const [role, setRole] = useState('admin');
   const [tenantId, setTenantId] = useState(pathTenantId || '');
   const [error, setError] = useState('');
+  const [logoutNotice, setLogoutNotice] = useState('');
   const [loading, setLoading] = useState(false);
   const [dbInfo, setDbInfo] = useState({ connected: false, mode: 'Diagnostic hook active...' });
 
@@ -19,12 +21,20 @@ export function LoginPage({ onLogin }) {
       .then((res) => res.json())
       .then((data) => setDbInfo({ connected: data.connected, mode: data.mode }))
       .catch(() => setDbInfo({ connected: false, mode: 'Diagnostics failed to query node' }));
-  }, []);
+
+    // Check for logout notice passed via navigation state or localStorage
+    const notice = location.state?.logoutReason || localStorage.getItem('logout_reason');
+    if (notice) {
+      setLogoutNotice(notice);
+      localStorage.removeItem('logout_reason');
+    }
+  }, [location.state]);
 
   const handleSubmit = async (e) => {
     e.preventDefault();
     setLoading(true);
     setError('');
+    setLogoutNotice('');
 
     try {
       const response = await fetch('/api/auth/login', {
@@ -46,7 +56,7 @@ export function LoginPage({ onLogin }) {
         throw new Error(data.message || 'Access authorization verification failed.');
       }
 
-      onLogin(data.user);
+      onLogin(data.user, data.token);
       if (role === 'admin') {
         navigate('/admin/numbers');
       } else {
@@ -62,13 +72,20 @@ export function LoginPage({ onLogin }) {
   return (
     <div className="min-h-screen bg-slate-100 flex items-center justify-center p-6">
       <div className="w-full max-w-sm bg-white rounded-lg shadow-xl shadow-slate-200/50 p-8 border border-slate-200 animate-in fade-in duration-300">
-        <div className="flex flex-col items-center mb-8">
-          <div className="w-10 h-10 bg-indigo-600 rounded flex items-center justify-center mb-4 shadow-lg animate-bounce">
+        <div className="flex flex-col items-center mb-6">
+          <div className="w-10 h-10 bg-indigo-600 rounded flex items-center justify-center mb-3 shadow-lg animate-bounce">
             <ShieldCheck className="text-white w-6 h-6" />
           </div>
           <h1 className="text-xl font-bold text-slate-900 tracking-tight">OBH Dashboard</h1>
           <p className="text-[11px] text-slate-400 mt-1 uppercase font-bold tracking-widest">Authentication Required</p>
         </div>
+
+        {logoutNotice && (
+          <div className="mb-4 p-3 bg-amber-50 border border-amber-200 rounded text-amber-800 text-xs font-medium leading-relaxed flex items-start gap-2 animate-in fade-in duration-200">
+            <AlertCircle className="w-4 h-4 text-amber-600 shrink-0 mt-0.5" />
+            <span>{logoutNotice}</span>
+          </div>
+        )}
 
         {error && (
           <div className="mb-4 p-3 bg-red-50 border border-red-200 rounded text-red-600 text-xs font-semibold leading-relaxed animate-in fade-in duration-200">

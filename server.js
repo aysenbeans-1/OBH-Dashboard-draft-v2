@@ -2,15 +2,123 @@ import express from 'express';
 import path from 'path';
 import { createServer as createViteServer } from 'vite';
 import dotenv from 'dotenv';
+import jwt from 'jsonwebtoken';
 import { query, isUsingMock } from './db.js';
 
 dotenv.config();
+
+const JWT_SECRET = process.env.JWT_SECRET || 'obh_dashboard_jwt_secret_key_2026';
+const SESSION_DURATION_MS = 15 * 60 * 1000; // 15 minutes inactivity limit
+
+function formatDateForDb(date) {
+  return date.toISOString().slice(0, 19).replace('T', ' ');
+}
+
+function generateJwtToken(user, sessionId) {
+  return jwt.sign(
+    { 
+      userId: user.id, 
+      username: user.username, 
+      role: user.role, 
+      tenantId: user.tenantId,
+      sessionId 
+    },
+    JWT_SECRET,
+    { expiresIn: '15m' }
+  );
+}
+
+// Core session validator + rolling extend helper
+async function validateAndExtendSession(token) {
+  if (!token) {
+    return { valid: false, code: 'MISSING_TOKEN', message: 'Authentication token is required.' };
+  }
+
+  let decoded;
+  try {
+    decoded = jwt.verify(token, JWT_SECRET);
+  } catch (err) {
+    if (err.name === 'TokenExpiredError') {
+      return { valid: false, code: 'TOKEN_EXPIRED', message: 'Session expired due to 15 minutes of inactivity.' };
+    }
+    return { valid: false, code: 'INVALID_TOKEN', message: 'Invalid authentication token.' };
+  }
+
+  // Check database / session storage for active session record (Layer 2)
+  const [sessions] = await query('SELECT * FROM user_sessions WHERE token = ? AND is_active = 1', [token]);
+  
+  if (!sessions || sessions.length === 0) {
+    return { 
+      valid: false, 
+      code: 'SESSION_INVALIDATED', 
+      message: 'Your session was invalidated because a new login was initiated from another device or location.' 
+    };
+  }
+
+  const session = sessions[0];
+  const now = new Date();
+  const expiresAt = new Date(session.expires_at);
+
+  if (now > expiresAt) {
+    await query('UPDATE user_sessions SET is_active = 0 WHERE token = ?', [token]);
+    return { valid: false, code: 'SESSION_EXPIRED', message: 'Session timed out after 15 minutes of inactivity.' };
+  }
+
+  // Extend rolling window by 15 mins (Layer 3)
+  const newExpiresAt = new Date(now.getTime() + SESSION_DURATION_MS);
+  const formattedNewExpires = formatDateForDb(newExpiresAt);
+
+  const user = {
+    id: decoded.userId,
+    username: decoded.username,
+    role: decoded.role,
+    tenantId: decoded.tenantId
+  };
+
+  const newToken = generateJwtToken(user, session.id);
+
+  // Update session record in DB
+  await query(
+    'UPDATE user_sessions SET last_activity_at = CURRENT_TIMESTAMP, expires_at = ?, token = ? WHERE id = ?',
+    [formattedNewExpires, newToken, session.id]
+  );
+
+  return {
+    valid: true,
+    user,
+    sessionId: session.id,
+    newToken
+  };
+}
 
 async function startServer() {
   const app = express();
   const PORT = 3000;
 
   app.use(express.json());
+
+  // Middleware to automatically validate & extend sessions for protected API calls
+  const requireAuth = async (req, res, next) => {
+    const authHeader = req.headers.authorization;
+    const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : null;
+
+    const sessionCheck = await validateAndExtendSession(token);
+    if (!sessionCheck.valid) {
+      return res.status(401).json({
+        success: false,
+        code: sessionCheck.code,
+        message: sessionCheck.message
+      });
+    }
+
+    req.user = sessionCheck.user;
+    req.sessionId = sessionCheck.sessionId;
+    req.newToken = sessionCheck.newToken;
+    
+    // Pass updated token back in response header for client auto-refresh
+    res.setHeader('X-Refreshed-Token', sessionCheck.newToken);
+    next();
+  };
 
   // ==========================================
   // API Endpoints
@@ -40,7 +148,7 @@ async function startServer() {
 
       const matchUser = users[0];
 
-      // Password checks (direct comparisons consistent with initial schema values)
+      // Password checks
       if (matchUser.password !== password) {
         return res.status(401).json({ 
           success: false, 
@@ -48,7 +156,7 @@ async function startServer() {
         });
       }
 
-      // Role checks (prevents cross-role elevation)
+      // Role checks
       if (matchUser.role !== role) {
         return res.status(403).json({ 
           success: false, 
@@ -61,7 +169,6 @@ async function startServer() {
         const checkTenant = tenantId.toLowerCase().trim();
         const userTenant = (matchUser.tenant_id || '').toLowerCase().trim();
         
-        // Match base name or substring to allow flexible matches like "dbsbank" -> "dbs"
         if (userTenant !== checkTenant && !userTenant.includes(checkTenant) && !checkTenant.includes(userTenant)) {
           return res.status(403).json({ 
             success: false, 
@@ -77,9 +184,25 @@ async function startServer() {
         tenantId: matchUser.tenant_id || undefined
       };
 
+      // --- Layer 2: Clear/Invalidate existing active sessions for this user before issuing new one ---
+      await query('UPDATE user_sessions SET is_active = 0 WHERE username = ? AND is_active = 1', [matchUser.username]);
+
+      // --- Layer 3: Generate JWT token & record new active session ---
+      const sessionId = `sess_${Date.now()}_${Math.random().toString(36).substring(2, 7)}`;
+      const token = generateJwtToken(authObject, sessionId);
+      const expiresAt = new Date(Date.now() + SESSION_DURATION_MS);
+      const formattedExpires = formatDateForDb(expiresAt);
+
+      await query(
+        'INSERT INTO user_sessions (id, user_id, username, token, expires_at, is_active) VALUES (?, ?, ?, ?, ?, 1)',
+        [sessionId, matchUser.id, matchUser.username, token, formattedExpires]
+      );
+
       return res.json({
         success: true,
         user: authObject,
+        token,
+        expiresAt: expiresAt.toISOString(),
         dbType: isUsingMock() ? 'Simulator fallback' : 'Real Database'
       });
 
@@ -89,6 +212,47 @@ async function startServer() {
         success: false, 
         message: 'Internal Gateway auth flow failed.' 
       });
+    }
+  });
+
+  // Verify / Heartbeat endpoint for active session check & rolling token refresh
+  app.post('/api/auth/verify', async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : (req.body && req.body.token);
+
+      const sessionCheck = await validateAndExtendSession(token);
+      if (!sessionCheck.valid) {
+        return res.status(401).json({
+          success: false,
+          code: sessionCheck.code,
+          message: sessionCheck.message
+        });
+      }
+
+      return res.json({
+        success: true,
+        user: sessionCheck.user,
+        refreshedToken: sessionCheck.newToken
+      });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
+    }
+  });
+
+  // Explicit Logout endpoint (invalidates session in database)
+  app.post('/api/auth/logout', async (req, res) => {
+    try {
+      const authHeader = req.headers.authorization;
+      const token = authHeader && authHeader.startsWith('Bearer ') ? authHeader.substring(7) : (req.body && req.body.token);
+
+      if (token) {
+        await query('UPDATE user_sessions SET is_active = 0 WHERE token = ?', [token]);
+      }
+
+      return res.json({ success: true, message: 'Logged out and session invalidated.' });
+    } catch (err) {
+      return res.status(500).json({ success: false, message: err.message });
     }
   });
 

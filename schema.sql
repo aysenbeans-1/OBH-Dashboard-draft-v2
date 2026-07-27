@@ -6,6 +6,7 @@ CREATE DATABASE IF NOT EXISTS obhdashboard;
 USE obhdashboard;
 
 -- Drop tables in reverse order of dependencies
+DROP TABLE IF EXISTS user_sessions;
 DROP TABLE IF EXISTS user_profiles;
 DROP TABLE IF EXISTS tenants;
 DROP TABLE IF EXISTS connections;
@@ -20,6 +21,19 @@ CREATE TABLE users (
   role ENUM('admin', 'customer') NOT NULL,
   tenant_id VARCHAR(50) DEFAULT NULL,
   created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+);
+
+-- 1b. Create User Sessions Table for 3-layer session management
+CREATE TABLE user_sessions (
+  id VARCHAR(64) PRIMARY KEY,
+  user_id VARCHAR(36) NOT NULL,
+  username VARCHAR(100) NOT NULL,
+  token TEXT NOT NULL,
+  created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP,
+  last_activity_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+  expires_at TIMESTAMP NOT NULL,
+  is_active BOOLEAN DEFAULT TRUE,
+  FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
 );
 
 -- 2. Create Companies Table (Step 1)
